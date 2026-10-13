@@ -20,7 +20,7 @@ or `MCP_PYTHON`. The default server is the sibling
 ## Run the web UI
 
 ```sh
-python web_ui.py
+langgraph dev
 # Open http://127.0.0.1:8000
 ```
 
