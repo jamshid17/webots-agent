@@ -3,3 +3,5 @@ langchain
 langchain-openai
 langchain-mcp-adapters
 fastmcp
+typesafe-sdk
+langchain-google-genai

@@ -41,3 +41,9 @@ not load camera images. Commands are requested one at a time because the server
 uses a single command file per robot.
 
 MCP integration follows the [LangChain MCP adapter documentation](https://github.com/langchain-ai/langchain-mcp-adapters).
+
+## Agent5: built-in Webots object recognition
+
+Graph **agent5** (`src/agent5.py`) adds a perception-first MCP agent and a separate
+NAO recognition demo world. Setup, example prompts, checks, and limitations are in
+[prototype/recognition/README.md](prototype/recognition/README.md).

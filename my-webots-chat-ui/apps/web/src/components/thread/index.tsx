@@ -16,6 +16,7 @@ import { LangGraphLogoSVG } from "../icons/langgraph";
 import { TooltipIconButton } from "./tooltip-icon-button";
 import {
   ArrowDown,
+  CircleStop,
   LoaderCircle,
   PanelRightOpen,
   PanelRightClose,
@@ -95,6 +96,23 @@ function OpenGitHubRepo() {
   );
 }
 
+// ---------------------------------------------------------------------------
+// Emergency stop pre-check (client-side, fires before any round trip).
+// Short messages that clearly demand a stop take the fast path: the in-flight
+// run is killed (multitaskStrategy "interrupt" cancels the server-side run,
+// so the stop does not queue behind a still-running LLM call) and STOP is
+// dispatched immediately. The backend then routes it through the Jev gate /
+// fast path straight to the stop tool.
+// ---------------------------------------------------------------------------
+const EMERGENCY_STOP_RE = /\b(stop|halt|abort|emergency|red\s?alert)\b/i;
+
+const isEmergencyStop = (text: string) => {
+  const t = text.trim();
+  // Only short, imperative messages count — avoids treating sentences like
+  // "why does the robot stop sometimes?" as emergencies.
+  return t.length > 0 && t.length <= 30 && EMERGENCY_STOP_RE.test(t);
+};
+
 export function Thread() {
   const [threadId, setThreadId] = useQueryState("threadId");
   const [chatHistoryOpen, setChatHistoryOpen] = useQueryState(
@@ -157,34 +175,56 @@ export function Thread() {
     prevMessageLength.current = messages.length;
   }, [messages]);
 
-  const handleSubmit = (e: FormEvent) => {
-    e.preventDefault();
-    if (!input.trim() || isLoading) return;
+  // Fast-path dispatch used by both the input box and the STOP button.
+  // When `interrupt` is true and a run is in flight: stop the local stream
+  // immediately, then submit with multitaskStrategy "interrupt" so the server
+  // cancels the in-flight run and executes the stop right away.
+  const submitMessage = (text: string, interrupt: boolean) => {
+    const trimmed = text.trim();
+    if (!trimmed) return;
     setFirstTokenReceived(false);
 
     const newHumanMessage: Message = {
       id: uuidv4(),
       type: "human",
-      content: input,
+      content: trimmed,
     };
 
     const toolMessages = ensureToolCallsHaveResponses(stream.messages);
+
+    if (interrupt) {
+      stream.stop();
+      toast("⏹️ Emergency stop", {
+        description:
+          "Cancelled the running action and dispatched STOP immediately.",
+        richColors: true,
+      });
+    }
+
     stream.submit(
       { messages: [...toolMessages, newHumanMessage] },
       {
         streamMode: ["values"],
+        multitaskStrategy: interrupt ? "interrupt" : undefined,
         optimisticValues: (prev) => ({
           ...prev,
-          messages: [
-            ...(prev.messages ?? []),
-            ...toolMessages,
-            newHumanMessage,
-          ],
+          messages: [...(prev.messages ?? []), ...toolMessages, newHumanMessage],
         }),
       },
     );
 
-    setInput("");
+    if (text === input) setInput("");
+  };
+
+  const handleSubmit = (e: FormEvent) => {
+    e.preventDefault();
+    const emergency = isEmergencyStop(input);
+    if (!input.trim() || (isLoading && !emergency)) return;
+    submitMessage(input, emergency && isLoading);
+  };
+
+  const handleEmergencyStop = () => {
+    submitMessage("STOP!", true);
   };
 
   const handleRegenerate = (
@@ -422,20 +462,32 @@ export function Thread() {
                           </Label>
                         </div>
                       </div>
-                      {stream.isLoading ? (
-                        <Button key="stop" onClick={() => stream.stop()}>
-                          <LoaderCircle className="w-4 h-4 animate-spin" />
-                          Cancel
-                        </Button>
-                      ) : (
+                      <div className="flex items-center gap-2">
                         <Button
-                          type="submit"
+                          type="button"
+                          variant="destructive"
                           className="transition-all shadow-md"
-                          disabled={isLoading || !input.trim()}
+                          onClick={handleEmergencyStop}
+                          title="Emergency stop: cancels the running action and stops the robot immediately"
                         >
-                          Send
+                          <CircleStop className="w-4 h-4" />
+                          STOP
                         </Button>
-                      )}
+                        {stream.isLoading ? (
+                          <Button key="cancel" onClick={() => stream.stop()}>
+                            <LoaderCircle className="w-4 h-4 animate-spin" />
+                            Cancel
+                          </Button>
+                        ) : (
+                          <Button
+                            type="submit"
+                            className="transition-all shadow-md"
+                            disabled={isLoading || !input.trim()}
+                          >
+                            Send
+                          </Button>
+                        )}
+                      </div>
                     </div>
                   </form>
                 </div>
